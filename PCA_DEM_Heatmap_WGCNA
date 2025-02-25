@@ -1,0 +1,239 @@
+#'----------------
+#' load in 
+#' --------------
+df<- read.csv('APP_127 organoid_lipid.csv')  
+## structured raw data, rows are lipids, columns are samples
+
+
+# reshape df to lm_df, 
+##lm_df: rows are samples, the first two columns are genotype and sex, the rest [3:280] are each lipid, values are log2 (raw value)
+
+
+#'----------------
+#' PCA
+#' --------------
+library(tidyverse)
+library(ggfortify)
+library(factoextra)
+
+res.pca<- prcomp(lm_df[, 3:229], scale. = T)
+
+# standard version
+autoplot(res.pca, data = lm_df, color='geno',
+         size=4, scale = F)+theme_classic()+
+  scale_color_manual(values = c('blue', 'brown3'))
+
+# enhanced version
+fviz_eig(res.pca) ##scree plot
+
+pdf('APP_lipid_PCA.pdf', width = 5, height = 4)
+fviz_pca_ind(res.pca,
+             col.ind = lm_df[,1], # color by groups
+             palette = c("#00AFBB",  "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             ellipse.type = "confidence",
+             legend.title = "Genotype",
+             repel = TRUE)+ 
+  theme(plot.title = element_blank())
+graphics.off()     
+
+
+#'----------------
+#' DEM
+#' --------------
+
+# Step 1: Reshape the data to long format
+## so that columns are geno, lipid, value
+long_df <- lm_df %>%
+  pivot_longer(cols = -c(geno, sampleID),
+               names_to = "lipid", 
+               values_to = "value")
+
+
+# Step 2.1: Write a Function to check equal variance and perform t-test
+perform_t_test <- function(data) {
+  # Check for equal variances using an F-test
+  var_test <- var.test(value ~ geno, data = data)
+  
+  # Perform t-test depending on the variance test result
+  if (var_test$p.value > 0.05) {
+    # Equal variances, use standard t-test
+    t_test_result <- t.test(value ~ geno, data = data, var.equal = TRUE)
+  } else {
+    # Unequal variances, use Welch's t-test
+    t_test_result <- t.test(value ~ geno, data = data, var.equal = FALSE)
+  }
+  
+  # Return p-value and test type (for reference)
+  return(data.frame(p_value = t_test_result$p.value, test_type = ifelse(var_test$p.value > 0.05, "Student's t-test", "Welch t-test")))
+}
+
+
+# Step 2.2: Apply the function to each lipid
+results <- long_df %>%
+  group_by(lipid) %>%
+  do(perform_t_test(.)) %>%
+  ungroup()
+
+results$padj<- p.adjust(results$p_value, method = 'BH')
+
+
+# Step 3: check sig DE lipid
+sig.dep<- results %>% filter(padj<0.05)  ## none
+sig.dep<- results %>% filter(p_value<0.05)
+write.csv(sig.dep, 'APP_lipid_DEP.csv')
+
+
+#'----------------
+#' Heatmap of DEM
+#' --------------
+
+# Step 1: Subset the original long_df to include only the significant lipids
+sig_lipids <- sig.dep$lipid
+long_sig_df <- long_df %>% filter(lipid %in% sig_lipids)
+
+# Step 2: Reshape data for heatmap (wide format)
+## so that heatmap_data is a matrix, with samples on the columns and lipids on the rows
+heatmap_data <- long_sig_df [, -1] #remove the genotype columns for now
+
+heatmap_data <- heatmap_data %>%
+  pivot_wider(names_from = "sampleID", values_from = "value")
+
+heatmap_data <- heatmap_data %>% column_to_rownames(var = 'lipid')
+
+# Step 3: prepare col anno for the heatmap
+## so that rownames are samples (order matched colnames of heatmap_data), columns are each metadata variables
+
+anno<- lm_df[, c(1, 2)]
+rownames(anno)<-  NULL
+anno<- anno %>% column_to_rownames(var = 'sampleID')
+identical(rownames(anno), colnames(heatmap_data))
+colnames(anno)<- 'Genotype'
+
+
+# Step 4: Create a heatmap
+pdf('APP_lipid_DEM_heatmap.pdf', height = 6, width = 8)
+pheatmap(as.matrix(heatmap_data),  
+         cluster_rows = TRUE,  
+         cluster_cols = TRUE,  
+         scale = "row",        
+         show_rownames = TRUE, 
+         show_colnames = FALSE, 
+         annotation_col = anno, # Add genotype annotation
+         main = "APP_127_organoid_lipids",
+         annotation_names_col = FALSE) 
+graphics.off()
+
+
+
+#'----------------
+#' WGCNA
+#' --------------
+library(WGCNA)
+library(tidyverse)
+library(gridExtra)
+
+# 1. it requires to put samples as rows and genes as columns------------------------
+x<- lm_df[, -c(1:2)]
+
+
+# 2. Automatic Network construction ------------------------
+power<- c(c(1:10), seq(from=12, to=50, by=2))
+sft<- pickSoftThreshold(x, powerVector=power, verbose=5)
+sft.data<- sft$fitIndices
+
+a1<- ggplot(sft.data, aes(power, SFT.R.sq, label=power))+geom_point()+geom_text(nudge_y = 0.1)+geom_hline(yintercept = 0.8, color='red')+labs(x='power', y='scale free topology model fit, signed R^2')+theme_classic()
+a2<- ggplot(sft.data, aes(power, mean.k., label=power))+geom_point()+geom_text(nudge_y = 0.1)+labs(x='power', y='mean connectivity')+theme_classic()
+grid.arrange(a1, a2, nrow=2)
+
+soft_power<- 10
+
+x[]<- sapply(x, as.numeric)
+all(sapply(x, is.numeric))
+
+bwnet<- blockwiseModules(x, 
+                         maxBlockSize = 40, 
+                         networkType='unsigned', 
+                         power=soft_power, 
+                         mergeCutHeight = 0.25, 
+                         minModuleSize = 5, numericLabels = FALSE, verbose = 3, corType='bicor')
+module_eigengenes<- bwnet$MEs
+
+
+# 3. get traits data (requires categorical variables to be binarized)-------------------------
+
+metadata<- lm_df[, c(1, 2)]
+
+
+# 4. Relate modules to traits------------------------------------------------------------
+lmm<- merge(module_eigengenes, metadata, by='row.names')
+lmm<- lmm %>% column_to_rownames(var = 'Row.names')
+
+corrcoef<- c()
+pval<- c()
+
+for (i in 1:10){              # 10 is the number of module eigengenes! Not samples!
+  ko.lm<- lm(lmm[, i]~geno, data = lmm)
+  corrcoef[i]<-summary(ko.lm)$coefficients['genoko', 'Estimate']
+  pval[i]<-summary(ko.lm)$coefficients['genoko', 'Pr(>|t|)']}
+
+pval
+corrcoef
+
+# 5. Visualize modules – trait correlation as a heatmap---------------------------------------
+MEColors<- substring(names(module_eigengenes), 3)
+MEColors
+MEColorNames<- names(module_eigengenes)
+
+textMatrix<- paste(signif(corrcoef, 2), ' (', signif(pval, 2), ')', sep = '')
+ 
+dim(corrcoef)<- c(10, 1) # 10 is the number of module eigengenes! Not samples!
+dim(textMatrix)<- dim(corrcoef)
+
+
+pdf('APP_lipid_WGCNA_heatmap.pdf')
+par(mar=c(5, 16, 3, 3))
+labeledHeatmap(Matrix = corrcoef, xLabels = 'Genotype', 
+               yLabels = MEColorNames, 
+               ySymbols=MEColorNames, 
+               colorLabels = FALSE, 
+               colors = blueWhiteRed(50), 
+               textMatrix = textMatrix, setStdMargins = FALSE, 
+               cex.text = 1.5, zlim=c(-1, 1), 
+               main='', 
+               font.lab.x = 2, font.lab.y = 2, cex.lab = 1.5, 
+               xColorWidth=0.25, cex.main=1.5)
+graphics.off()
+
+# get the genes in a specific module
+module.gene.mapping<- as.data.frame(bwnet$colors)
+module.gene.mapping %>% filter(bwnet$colors=='yellow')
+write.csv(module.gene.mapping, 'APP_lipid_WGCNA_yellow_model_lipids.csv')
+
+
+# 6. GeneInfo----------------------------------------------------------------------------------
+
+module.gene.mapping<- as.data.frame(bwnet$colors)
+all(rownames(x)==rownames(module_eigengenes))
+
+module.membership.measure<- cor(module_eigengenes, x, use = 'p' )
+
+nSamples<- nrow(x)
+
+module.membership.measure.pvals<- corPvalueStudent(module.membership.measure, nSamples)
+
+module.membership.measure.pvals[1:10, 1:10]
+
+module.membership.measure.pvals<- as.data.frame(t(module.membership.measure.pvals))
+
+module.membership.measure<- as.data.frame(t(module.membership.measure))
+MEColors<- substring(names(module_eigengenes), 3)
+MEColors
+
+names(module.membership.measure)<- paste('MM', MEColors, sep = '.')
+names(module.membership.measure.pvals)<- paste('p.MM', MEColors, sep = '.')
+
+geneInfo<- data.frame(module.gene.mapping, module.membership.measure, module.membership.measure.pvals)
+write.csv(geneInfo, 'APP_lipid_WGCNA_lipid_info.csv')
+
+
