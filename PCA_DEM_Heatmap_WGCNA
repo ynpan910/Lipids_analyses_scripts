@@ -246,3 +246,38 @@ geneInfo<- data.frame(module.gene.mapping, module.membership.measure, module.mem
 write.csv(geneInfo, 'APP_lipid_WGCNA_lipid_info.csv')
 
 
+# 7. Module_eigengenes_group_difference_boxplot-----------------------------------------------------------------------------------------
+
+##magenta
+magenta<- module_eigengenes %>% select(MEmagenta)
+magenta$geno<- c('wt','wt','wt','ko','ko','ko' )
+magenta$geno<- factor(magenta$geno, levels = c('wt', 'ko'))
+
+
+library(ggpubr)
+p<- ggplot(magenta, aes(x = geno, y = MEmagenta, fill = geno)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, size = 2) + 
+  labs(title = "Magenta module",
+       x = "",
+       y = "ME")+
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size=12,face = "bold", color = "black" ),
+    axis.title.x = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y = element_text(size = 12, face = "bold", color = "black"),
+    axis.title.y = element_text(size = 12, face = "bold", color = "black"),
+    legend.title = element_text(size = 12, face = "bold", color = "black"),
+    legend.text = element_text(size = 12, face = 'bold', color = 'black'),
+    plot.title = element_text(hjust = 0.5, face = 'bold')
+  )+
+  scale_x_discrete(labels = c("wt" = "WT", "ko" = "KO")) +  # Change x-axis labels
+  scale_fill_manual(values = c("wt" = "#69b3a2", "ko" = "#ff7f0e")) +  # Custom fill colors
+  guides(fill = "none")  +  # Remove legend
+  stat_compare_means(method = "t.test",
+                     method.args = list(var.equal = TRUE))
+
+pdf('Organoid_117_192_WGCNA_Magenta_boxplot.pdf')
+p
+graphics.off()
+
