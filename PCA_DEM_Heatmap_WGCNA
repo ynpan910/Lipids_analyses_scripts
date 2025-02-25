@@ -9,7 +9,8 @@ df<- read.csv('APP_127 organoid_lipid.csv')
 ##lm_df: rows are samples, 
          the first two columns are genotype and sex, 
          the rest [3:280] are each lipid, 
-         values are log2 (raw value)
+         values are log2 (raw value),
+         remember to set factor levels for genotype.
 
 
 #'----------------
@@ -93,6 +94,7 @@ write.csv(sig.dep, 'APP_lipid_DEP.csv')
 #'----------------
 #' Heatmap of DEM
 #' --------------
+library(pheatmap)
 
 # Step 1: Subset the original long_df to include only the significant lipids
 sig_lipids <- sig.dep$lipid
@@ -115,6 +117,7 @@ rownames(anno)<-  NULL
 anno<- anno %>% column_to_rownames(var = 'sampleID')
 identical(rownames(anno), colnames(heatmap_data))
 colnames(anno)<- 'Genotype'
+anno$Genotype<- factor(anno$Genotype, levels = c('wt', 'ko'))
 
 
 # Step 4: Create a heatmap
