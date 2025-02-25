@@ -274,8 +274,9 @@ p<- ggplot(magenta, aes(x = geno, y = MEmagenta, fill = geno)) +
   scale_x_discrete(labels = c("wt" = "WT", "ko" = "KO")) +  # Change x-axis labels
   scale_fill_manual(values = c("wt" = "#69b3a2", "ko" = "#ff7f0e")) +  # Custom fill colors
   guides(fill = "none")  +  # Remove legend
-  stat_compare_means(method = "t.test",
-                     method.args = list(var.equal = TRUE))
+ stat_compare_means(method = "t.test",
+                     method.args = list(var.equal = TRUE),
+                     size=5) # change font size
 
 pdf('Organoid_117_192_WGCNA_Magenta_boxplot.pdf')
 p
