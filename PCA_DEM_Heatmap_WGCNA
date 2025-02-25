@@ -6,12 +6,16 @@ df<- read.csv('APP_127 organoid_lipid.csv')
 
 
 # reshape df to lm_df, 
-##lm_df: rows are samples, the first two columns are genotype and sex, the rest [3:280] are each lipid, values are log2 (raw value)
+##lm_df: rows are samples, 
+         the first two columns are genotype and sex, 
+         the rest [3:280] are each lipid, 
+         values are log2 (raw value)
 
 
 #'----------------
 #' PCA
 #' --------------
+
 library(tidyverse)
 library(ggfortify)
 library(factoextra)
@@ -20,8 +24,10 @@ res.pca<- prcomp(lm_df[, 3:229], scale. = T)
 
 # standard version
 autoplot(res.pca, data = lm_df, color='geno',
-         size=4, scale = F)+theme_classic()+
+         size=4, scale = F)+
+  theme_classic()+
   scale_color_manual(values = c('blue', 'brown3'))
+
 
 # enhanced version
 fviz_eig(res.pca) ##scree plot
