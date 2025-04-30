@@ -1,0 +1,12 @@
+library(readxl)
+dt <- read_excel("dt.xlsx")
+
+dt$genotype<- factor(dt$genotype, levels = c('WT', 'KO', 'FAD_CT', 'FAD_KO'))
+dt$sex<- as.factor(dt$sex)
+
+# two-way anova
+res.aov<- aov(value~genotype+sex, data = dt)
+summary(res.aov)
+
+# tukey post hoc
+TukeyHSD(res.aov, which = 'genotype')
