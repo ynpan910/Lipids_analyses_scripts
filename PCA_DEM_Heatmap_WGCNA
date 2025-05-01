@@ -292,7 +292,8 @@ write.csv(geneInfo, 'APP_lipid_WGCNA_lipid_info.csv')
 
 # 7. Module_eigengenes_group_difference_boxplot-----------------------------------------------------------------------------------------
 
-##magenta
+##>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 1. magenta <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#' in this magenta example, it only has one condition: genotype, ko vs ctrl
 magenta<- module_eigengenes %>% select(MEmagenta)
 magenta$geno<- c('wt','wt','wt','ko','ko','ko' )
 magenta$geno<- factor(magenta$geno, levels = c('wt', 'ko'))
@@ -326,3 +327,50 @@ pdf('Organoid_117_192_WGCNA_Magenta_boxplot.pdf')
 p
 graphics.off()
 
+
+
+
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 2. brown <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#' in this brown example, it only has TWO condition: genotype, ko vs ctrl; and batch effect. So I need to adjust batch effect first
+
+brown<- module_eigengenes %>% select(MEbrown)
+brown$geno<- c('WT','WT','WT','KO','KO','KO' )
+brown$geno<- factor(brown$geno, levels = c('WT', 'KO'))
+brown$batch<- c(1, 2, 3,1, 2, 3)
+brown$batch<- factor(brown$batch, levels = c('1', '2', '3'))
+
+
+#' remove effect of batch
+model <- lm(MEbrown ~ batch, data = brown)
+brown$MEbrown_resid <- residuals(model)
+head(brown)
+
+
+library(ggpubr)
+p<- ggplot(brown, aes(x = geno, y = MEbrown_resid, fill = geno)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, size = 2) + 
+  labs(title = "brown module (Batch effect removed)",
+       x = "",
+       y = "ME")+
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size=12,face = "bold", color = "black" ),
+    axis.title.x = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y = element_text(size = 12, face = "bold", color = "black"),
+    axis.title.y = element_text(size = 12, face = "bold", color = "black"),
+    legend.title = element_text(size = 12, face = "bold", color = "black"),
+    legend.text = element_text(size = 12, face = 'bold', color = 'black'),
+    plot.title = element_text(hjust = 0.5, face = 'bold')
+  )+
+  scale_fill_manual(values = c("WT" = "#69b3a2", "KO" = "#ff7f0e")) +  # Custom fill colors
+  guides(fill = "none")  +  # Remove legend
+  stat_compare_means(method = "t.test",
+                     method.args = list(var.equal = TRUE),
+                     size=5,# change font size
+                     label.x = 1.8,
+                     label.y = 0.3) # change location
+
+pdf('Microglia_ipsc_WGCNA_brown_boxplot.pdf')
+p
+graphics.off()
