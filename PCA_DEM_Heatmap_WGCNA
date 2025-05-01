@@ -46,7 +46,7 @@ graphics.off()
 
 
 #'----------------
-#' DEM
+#' DEM by t test
 #' --------------
 
 # Step 1: Reshape the data to long format
@@ -89,6 +89,50 @@ results$padj<- p.adjust(results$p_value, method = 'BH')
 sig.dep<- results %>% filter(padj<0.05)  ## none
 sig.dep<- results %>% filter(p_value<0.05)
 write.csv(sig.dep, 'APP_lipid_DEP.csv')
+
+
+
+#'----------------------------------------
+#' DEM by ANOVA (to remove batch effect
+#' --------------------------------------
+#' In this analysis, I have genotype (3 KO, 3 ctrl) as condition, and three batch (i.e., KO1 and ctrl1, KO2 and ctrl2...)
+
+# Step 1: Reshape the data to long format
+## so that columns are GENOTYPE, BATCH, lipid, value
+
+
+
+# Step 2: Two way ANOVA
+lipids <- unique(long_dt$Lipid)
+anova_list <- list()
+
+#' Loop through each lipid
+for (lipid in lipids) {
+  # Subset data for this lipid
+  sub_df <- subset(long_dt, Lipid == lipid)
+  
+  # Run ANOVA: value ~ GENOTYPE + BATCH
+  fit <- aov(value ~ GENOTYPE + BATCH, data = sub_df)
+  
+  # Extract summary table and convert to data frame
+  fit_summary <- summary(fit)[[1]]
+  
+  # Add lipid name to result
+  fit_df <- as.data.frame(fit_summary)
+  fit_df$term <- rownames(fit_df) ## terms means GENOTYPE or BATCH or residual
+  fit_df$Lipid <- lipid
+  
+  # Save to list
+  anova_list[[lipid]] <- fit_df
+}
+
+anova_results <- do.call(rbind, anova_list)
+anova_results <- anova_results[, c("Lipid", "term", "Df", "`F value`", "Pr(>F)")]
+
+geno_res<- anova_results %>% filter(term == 'GENOTYPE   ')
+geno_res$padj<- p.adjust(geno_res$`Pr(>F)`, method = 'BH')
+geno_res_sig<- geno_res %>% filter(geno_res$padj < 0.05)
+
 
 
 #'----------------
