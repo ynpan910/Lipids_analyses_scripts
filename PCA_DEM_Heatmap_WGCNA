@@ -261,7 +261,7 @@ graphics.off()
 # get the genes in a specific module
 module.gene.mapping<- as.data.frame(bwnet$colors)
 module.gene.mapping %>% filter(bwnet$colors=='yellow')
-write.csv(module.gene.mapping, 'APP_lipid_WGCNA_yellow_model_lipids.csv')
+write.csv(module.gene.mapping, 'APP_lipid_WGCNA_lipids_in_each_module.csv')
 
 
 # 6. GeneInfo----------------------------------------------------------------------------------
