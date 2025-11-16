@@ -1,0 +1,102 @@
+# This is to plot a heatmap where each tile represents a lipid. The lipid name is composed of two parts: total double bound and total carbon. 
+# So in the heatmap, x is total carbon, y is double cound, each tile is one kind of such lipid.
+# The color of each tile represents the spearsman correlation between a lipid abundance and genotype.
+# So, if you set WT as 0, KO as 1, a red color tile means that lipid is higher in KO compared to WT.
+
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+file <- "Heatmap3.xlsx"
+sheets <- excel_sheets(file)
+df_list <- lapply(sheets, function(s) read_excel(file, sheet = s))
+names(df_list) <- sheets
+
+#' This is a excel with multiple tabs, each tab is named as the lipid name.
+#' In each tab, first column is DB, second column is C (carbon), then the next 6 columns are each sample, first three are WT, then 3 KO.
+#' That means, each row is a lipid's expression value across the six samples.
+
+
+
+# ---- 1. Create phenotype vector (WT = 1, KO = 0) ----
+# 01–03 = WT, 04–06 = KO
+phenotype <- c(0, 0, 0,1, 1, 1 )
+
+
+# ---- 2. Start the loop ----
+for (nm in names(df_list)) {
+  
+  df<- df_list[[nm]]
+  colnames(df)[1]<- 'DB'
+  colnames(df)[2]<- 'C'
+  
+  # ---- 2.1 Calculate correlation per lipid species ----
+  corr_df <- df %>%
+    rowwise() %>%
+    mutate(
+      # extract numeric vector of 6 samples for this row
+      values = list(c_across(starts_with("#"))),
+      
+      # correlation test
+      cor_test = list(cor.test(
+        x = unlist(values),
+        y = phenotype,
+        method = "spearman"
+      )),
+      r = cor_test$estimate,
+      pval = cor_test$p.value
+    ) %>%
+    ungroup() %>%
+    select(DB, C, r, pval)
+  corr_df$padj<- p.adjust(corr_df$pval, method = 'BH')
+  
+  
+  # ---- 2.2 Heatmap with significance stars ----
+  p<- ggplot(corr_df, aes(x = C, y = DB, fill = r)) +
+    geom_tile(color = "white") +
+    
+    # ---- significance stars ----
+    geom_text(
+      aes(label = ifelse(pval < 0.05, "*", "")),
+      color = "black",
+      size = 6,
+      fontface = "bold"
+    ) +
+      
+      scale_x_continuous(
+        breaks = seq(min(corr_df$C), max(corr_df$C), by = 2)
+      ) +
+      scale_y_continuous(
+        breaks = seq(min(corr_df$DB), max(corr_df$DB), by = 1)
+      ) +
+    scale_fill_gradientn(
+      colours = c("blue", "white", "red"),
+      values = scales::rescale(c(-0.8, 0, 0.8)),
+      limits = c(-0.8, 0.8),
+      oob = scales::squish,
+      name = "Correlation (r)"
+    ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(face = "bold", color = "black"),
+        axis.title.x = element_text(face = "bold", color = "black"),
+        axis.text.y = element_text(face = "bold", color = "black"),
+        axis.title.y = element_text(face = "bold", color = "black"),
+        legend.title = element_text(face = "bold", color = "black"),
+        legend.text = element_text(face = "bold", color = "black"),
+        plot.title = element_text(face = "bold", color = "black", hjust = 0.5)
+      ) +
+      labs(
+        title = "Lipid–Phenotype Correlation Map",
+        x = "Total C (carbon atoms)",
+        y = "Total DB (double bonds)"
+      )
+  
+  pdf(paste0(nm, '_heatmap.pdf'), width = 5, height = 4)
+  print(p)
+  dev.off()
+}
+
+
