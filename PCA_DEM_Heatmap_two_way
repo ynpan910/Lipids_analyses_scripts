@@ -1,0 +1,212 @@
+# This script is showing a group of analyses looking at by genotype difference while adjusting for sex effect.
+
+
+#'----------------
+#' step 1: load in 
+#' --------------
+df<- read.csv('organoid.csv')  
+## structured raw data, rows are lipids, columns are samples, values are already log2ed.
+
+
+# reshape df to lm_df, lm_df: rows are samples, the first three columns are genotype, sex, and sampleID, the rest [4:230] are each lipid, values are log2 (raw value)
+df<- df %>% column_to_rownames(var = 'lipid')
+lm_df <- as.data.frame(t(df))
+lm_df$geno<- c('WT', 'WT', 'WT', 'KO', 'KO', 'KO')
+lm_df$sex<- c('M', 'M', 'F', 'M', 'M', 'F')
+lm_df$sex<- as.factor(lm_df$sex)
+lm_df$sampleID<- rownames(lm_df)
+lm_df<- lm_df[, c(228:230, 1:227)]
+lm_df$geno<- factor(lm_df$geno, levels = c('WT', 'KO'))
+
+
+
+#'----------------
+#' step 2: PCA
+#' --------------
+library(tidyverse)
+library(ggfortify)
+library(factoextra)
+
+res.pca<- prcomp(lm_df[, 4:230], scale. = T)
+
+# standard version
+autoplot(res.pca, data = lm_df, color='geno',
+         size=4, scale = F)+
+  theme_classic()+
+  scale_color_manual(values = c('blue', 'brown3'))
+
+# enhanced version
+fviz_eig(res.pca) ##scree plot
+
+pdf('Organoid_PCA_geno.pdf', width = 6, height = 4)
+fviz_pca_ind(res.pca,
+             col.ind = lm_df[,1], # color by groups
+             palette = c("#00AFBB",  "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             ellipse.type = "confidence",
+             legend.title = "Genotype",
+             repel = TRUE)+ 
+  theme(plot.title = element_blank())
+graphics.off()     
+
+
+pdf('Organoid_PCA_sex.pdf', width = 6, height = 4)
+fviz_pca_ind(res.pca,
+             col.ind = lm_df[,2], # color by groups
+             palette = c( 'brown3', 'blue'),
+             addEllipses = TRUE, # Concentration ellipses
+             ellipse.type = "confidence",
+             legend.title = "Genotype",
+             repel = TRUE)+ 
+  theme(plot.title = element_blank())
+graphics.off()     
+
+
+#'----------------
+#' step3: DEP
+#' --------------
+library(dplyr)
+
+
+# Step 1: Reshape the data to long format
+## so that columns are geno, lipid, value
+long_df <- lm_df %>%
+  pivot_longer(cols = -c(geno, sampleID, sex),
+               names_to = "lipid", 
+               values_to = "value")
+
+
+
+# Step 2.1: Function to perform two-way ANOVA adjusted for sex, with group means and difference
+perform_two_way_anova <- function(data) {
+  
+  # Fit two-way ANOVA model
+  anova_model <- aov(value ~ geno + sex, data = data)
+  anova_table <- summary(anova_model)[[1]]
+  
+  # Extract ANOVA p-values and trim whitespace
+  anova_result <- data.frame(
+    term = trimws(rownames(anova_table)),
+    p_value = anova_table[,"Pr(>F)"],
+    row.names = NULL
+  )
+  
+  # Compute means by genotype ignoring sex
+  mean_KO <- mean(data %>% filter(geno == 'KO') %>% pull(value), na.rm = TRUE)
+  mean_WT <- mean(data %>% filter(geno == 'WT') %>% pull(value), na.rm = TRUE)
+  mean_diff <- mean_KO - mean_WT
+  
+  # Return a single-row data frame combining results
+  result <- data.frame(
+    p_geno = anova_result$p_value[anova_result$term == "geno"],
+    p_sex  = anova_result$p_value[anova_result$term == "sex"],
+    mean_WT = mean_WT,
+    mean_KO = mean_KO,
+    mean_diff = mean_diff
+  )
+  
+  return(result)
+}
+
+
+# Step 2.2: Apply the function to each lipid and set rownames as lipid
+results <- long_df %>%
+  group_by(lipid) %>%
+  group_modify(~ perform_two_way_anova(.x)) %>%
+  ungroup() %>%
+  column_to_rownames(var = "lipid")  # set rownames to lipid
+
+results$padj_geno<- p.adjust(results$p_geno, method = 'BH')
+
+
+# Step 3: check sig DE lipid
+sig.dep<- results %>% filter(padj_geno<0.05)  ## none
+sig.dep<- results %>% filter(p_geno<0.05)
+sig.dep<- sig.dep %>% arrange(-mean_diff)
+write.csv(sig.dep, 'Organoid_DEP_adjust_sex.csv')
+
+
+
+#'----------------
+#' step 4: Heatmap of DEP
+#' --------------
+# Step 1: Subset the original long_df to include only the significant lipids
+sig.dep<- read.csv('./117192/Organoid_DEP_adjust_sex.csv')
+sig_lipids <- sig.dep$lipid
+long_sig_df <- long_df %>% filter(lipid %in% sig_lipids)
+
+
+
+# Step 2: Reshape data for heatmap (wide format)
+## so that heatmap_data is a matrix, with samples on the columns and lipids on the rows
+heatmap_data <- long_sig_df [, -c(1:2)] #remove the genotype and sex columns for now
+heatmap_data <- heatmap_data %>%
+  pivot_wider(names_from = "sampleID", values_from = "value")
+heatmap_data <- heatmap_data %>% column_to_rownames(var = 'lipid')
+# the heatmap data is rows are lipids columns are samples.
+
+
+
+
+# Step 3: remove sex effect using limma:removebatcheffect
+identical(rownames(lm_df), colnames(heatmap_data))
+design<- model.matrix(~ geno, data = lm_df) # has to tell the function the condition difference that we wwant to keep
+heatmap_data_adjust<- limma::removeBatchEffect(heatmap_data, 
+                                               batch = lm_df$sex,
+                                               design = design)
+
+
+
+
+# Step 4: prepare col anno for the heatmap
+## so that rownames are samples (order matched colnames of heatmap_data_adjust), columns are each metadata variables
+anno<- lm_df[, c(1, 3)] # choose geno and samplID columns
+rownames(anno)<-  NULL
+anno<- anno %>% column_to_rownames(var = 'sampleID')
+identical(rownames(anno), colnames(heatmap_data_adjust))
+colnames(anno)<- 'Genotype'
+
+
+
+# Step 5: Create a heatmap
+library(pheatmap)
+breaks1<- seq(-1, 1, 0.1)
+colors1<- colorRampPalette(c('blue3', 'white', 'red2'))(length(breaks1) - 1)
+
+
+pdf('Organoid_DEP_adjust_sex_heatmap.pdf', height = 5, width = 12)
+pheatmap(
+  as.matrix(heatmap_data_adjust),
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  scale = "row",
+  show_rownames = TRUE,
+  show_colnames = FALSE,
+  annotation_col = anno,
+  main = "Organoid_lipid",
+  annotation_names_col = FALSE,
+  color = colors1,
+  breaks = breaks1,
+  cellwidth = 50,    # set these to make the default boarder line visible
+  cellheight = 30   # set these to make the default boarder line visible
+)
+graphics.off()
+
+
+# just sanity check if not removing sex effect
+identical(rownames(anno), colnames(heatmap_data))
+pheatmap(as.matrix(heatmap_data),  
+         cluster_rows = TRUE,  
+         cluster_cols = F,  
+         scale = "row",        
+         show_rownames = TRUE, 
+         show_colnames = FALSE, 
+         annotation_col = anno, # Add genotype annotation
+         main = "Organoid_lipid",
+         annotation_names_col = FALSE,
+         color = colors1, breaks = breaks1,
+         border_color = "grey80") 
+
+
+
+
